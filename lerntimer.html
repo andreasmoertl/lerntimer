@@ -514,6 +514,79 @@
   }
   .sound-toggle:hover { color: white; background: rgba(255,255,255,0.15); }
 
+  /* === RESPONSIVE: iPhone optimization === */
+  @media (max-width: 430px) {
+    .profile-screen { gap: 28px; padding: 20px; }
+    .profile-screen h1 { font-size: 2.2rem; }
+    .profile-screen h1 span { font-size: 1rem; }
+    .profile-cards { flex-direction: column; gap: 16px; }
+    .profile-card { width: 220px; height: 240px; border-radius: 22px; }
+    .profile-avatar { width: 70px; height: 70px; font-size: 2.2rem; }
+    .profile-card h2 { font-size: 1.3rem; }
+
+    .timer-screen { padding: 16px 12px; }
+    .timer-header { margin-bottom: 12px; }
+    .user-badge { font-size: 0.95rem; padding: 6px 14px 6px 8px; }
+    .user-badge .mini-avatar { width: 28px; height: 28px; font-size: 0.9rem; }
+    .stats-badge { font-size: 0.8rem; padding: 6px 12px; }
+    .back-btn { width: 38px; height: 38px; font-size: 1.1rem; border-radius: 12px; }
+
+    .subject-bar { gap: 6px; margin-bottom: 14px; }
+    .subject-btn { padding: 6px 12px; font-size: 0.75rem; }
+
+    .timer-container { width: 220px; height: 220px; margin: 6px 0 18px; }
+    .timer-ring-bg circle, .timer-ring-progress circle { stroke-width: 8; }
+    .timer-time { font-size: 3.2rem; }
+    .timer-label { font-size: 0.75rem; margin-top: 4px; }
+
+    .duration-presets { gap: 6px; margin-bottom: 16px; flex-wrap: wrap; justify-content: center; }
+    .preset-btn { width: 48px; height: 48px; border-radius: 14px; font-size: 0.9rem; }
+    .preset-btn span { font-size: 0.5rem; }
+
+    .controls { gap: 14px; }
+    .play-btn { width: 64px; height: 64px; font-size: 1.6rem; }
+    .secondary-btn { width: 44px; height: 44px; font-size: 1.2rem; }
+
+    .session-log { margin-top: 20px; }
+    .session-log h3 { font-size: 0.75rem; }
+    .log-item { padding: 8px 12px; font-size: 0.78rem; }
+
+    .break-banner h2 { font-size: 1.8rem; }
+    .break-banner p { font-size: 0.95rem; max-width: 280px; }
+    .break-banner .break-timer { font-size: 3rem; }
+    .break-btn { padding: 12px 28px; font-size: 1rem; }
+
+    .stats-nav-btn { padding: 8px 14px; font-size: 0.85rem; top: 14px; right: 14px; }
+  }
+
+  /* Extra small: iPhone 12 mini / SE */
+  @media (max-width: 375px) {
+    .profile-screen h1 { font-size: 1.9rem; }
+    .profile-card { width: 200px; height: 220px; }
+    .profile-avatar { width: 60px; height: 60px; font-size: 1.8rem; }
+
+    .timer-container { width: 190px; height: 190px; margin: 4px 0 14px; }
+    .timer-time { font-size: 2.8rem; }
+
+    .preset-btn { width: 42px; height: 42px; font-size: 0.85rem; border-radius: 12px; }
+    .play-btn { width: 58px; height: 58px; font-size: 1.4rem; }
+    .secondary-btn { width: 40px; height: 40px; font-size: 1.1rem; }
+
+    .subject-btn { padding: 5px 10px; font-size: 0.7rem; }
+  }
+
+  /* Safe area for notch/dynamic island */
+  @supports (padding-top: env(safe-area-inset-top)) {
+    .timer-screen, .profile-screen, .stats-screen {
+      padding-top: calc(16px + env(safe-area-inset-top));
+      padding-bottom: calc(16px + env(safe-area-inset-bottom));
+    }
+    .break-banner {
+      padding-top: env(safe-area-inset-top);
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+  }
+
   /* Stats Button on Profile Screen */
   .stats-nav-btn {
     position: fixed;
@@ -927,6 +1000,8 @@ let todayMinutes = 0;
 let sessions = [];
 let currentSubject = '';
 let soundEnabled = true;
+let savedTimerSeconds = 0; // saved timer state during break
+let wasRunningBeforeBreak = false;
 
 const profiles = {
   benno: {
@@ -1133,11 +1208,13 @@ function completeSession() {
   updateStats();
   saveStats();
 
-  // Show break
-  breakSeconds = minutesLearned >= 25 ? 300 : 300; // 5 min break
+  // Show break - session is done, no resume needed
+  wasRunningBeforeBreak = false;
+  savedTimerSeconds = 0;
+  breakSeconds = 300;
   showBreak();
 
-  // Reset timer
+  // Reset timer for next session
   timerSeconds = totalSeconds;
   document.getElementById('playBtn').textContent = '▶';
   document.getElementById('timerLabel').textContent = 'Bereit';
@@ -1146,25 +1223,21 @@ function completeSession() {
 
 function skipToBreak() {
   if (!isRunning && !isPaused) return;
-  const elapsedSeconds = totalSeconds - timerSeconds;
-  const minutesLearned = Math.round(elapsedSeconds / 60);
-  if (minutesLearned > 0) {
-    todayMinutes += minutesLearned;
-    sessions.push({ subject: currentSubject, minutes: minutesLearned, time: new Date() });
-    updateSessionLog();
-    updateStats();
-    saveStats();
-  }
   clearInterval(timerInterval);
+  
+  // Save current timer state to resume after break
+  savedTimerSeconds = timerSeconds;
+  wasRunningBeforeBreak = true;
+  
   isRunning = false;
   isPaused = false;
   breakSeconds = 300;
-  showBreak();
-  timerSeconds = totalSeconds;
+  
   document.getElementById('playBtn').textContent = '▶';
-  document.getElementById('timerLabel').textContent = 'Bereit';
+  document.getElementById('timerLabel').textContent = 'Pause…';
   document.querySelector('.timer-display').classList.remove('pause-mode');
-  updateTimerDisplay();
+  
+  showBreak();
 }
 
 // === BREAK ===
@@ -1204,6 +1277,25 @@ function endBreak() {
   playClick();
   clearInterval(breakInterval);
   document.getElementById('breakBanner').classList.remove('active');
+  
+  // Resume timer if break was triggered mid-session via ☕
+  if (wasRunningBeforeBreak && savedTimerSeconds > 0) {
+    timerSeconds = savedTimerSeconds;
+    savedTimerSeconds = 0;
+    wasRunningBeforeBreak = false;
+    updateTimerDisplay();
+    
+    // Auto-resume
+    isRunning = true;
+    isPaused = false;
+    playStart();
+    document.getElementById('playBtn').textContent = '⏸';
+    document.getElementById('timerLabel').textContent = `${currentSubject} · Lernen`;
+    timerInterval = setInterval(tick, 1000);
+  } else {
+    wasRunningBeforeBreak = false;
+    savedTimerSeconds = 0;
+  }
 }
 
 // === SESSION LOG ===
