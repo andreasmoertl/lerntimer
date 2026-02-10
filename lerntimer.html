@@ -1005,9 +1005,11 @@ let currentSubject = '';
 let soundEnabled = true;
 let savedTimerSeconds = 0; // saved timer state during break
 let wasRunningBeforeBreak = false;
+let currentSessionElapsed = 0; // tracks seconds elapsed in current running session
 
 const profiles = {
   benno: {
+    id: 'benno',
     name: 'Benno',
     emoji: '🚀',
     color: '#3B82F6',
@@ -1017,6 +1019,7 @@ const profiles = {
     presets: [5, 15, 20, 25, 30, 45, 60]
   },
   maxi: {
+    id: 'maxi',
     name: 'Maximiliane',
     emoji: '🦋',
     color: '#EC4899',
@@ -1046,6 +1049,18 @@ function playTone(freq, duration, type = 'sine') {
 
 function playStart() { playTone(523, 0.15); setTimeout(() => playTone(659, 0.15), 120); setTimeout(() => playTone(784, 0.2), 240); }
 function playDone() { playTone(784, 0.15); setTimeout(() => playTone(988, 0.15), 150); setTimeout(() => playTone(1175, 0.3), 300); }
+function playAlarm() {
+  if (!soundEnabled) return;
+  // Play a clear, noticeable alarm melody (3 repeats)
+  const notes = [
+    [784, 0], [988, 200], [1175, 400],
+    [784, 700], [988, 900], [1175, 1100],
+    [1318, 1500], [1175, 1700], [1318, 1900], [1568, 2100]
+  ];
+  notes.forEach(([freq, delay]) => {
+    setTimeout(() => playTone(freq, 0.25), delay);
+  });
+}
 function playClick() { playTone(800, 0.05, 'square'); }
 function playTick() { playTone(1200, 0.02, 'square'); }
 
@@ -1138,6 +1153,7 @@ function toggleTimer() {
     // Start
     isRunning = true;
     isPaused = false;
+    currentSessionElapsed = 0;
     playStart();
     document.getElementById('playBtn').textContent = '⏸';
     document.getElementById('timerLabel').textContent = `${currentSubject} · Lernen`;
@@ -1166,13 +1182,16 @@ function tick() {
   if (timerSeconds <= 0) {
     clearInterval(timerInterval);
     isRunning = false;
+    currentSessionElapsed = 0;
     completeSession();
     return;
   }
   timerSeconds--;
+  currentSessionElapsed++;
   // Tick sound for last 5 seconds
   if (timerSeconds <= 5 && timerSeconds > 0) playTick();
   updateTimerDisplay();
+  updateStats();
 }
 
 function updateTimerDisplay() {
@@ -1192,6 +1211,7 @@ function resetTimer() {
   clearInterval(timerInterval);
   isRunning = false;
   isPaused = false;
+  currentSessionElapsed = 0;
   timerSeconds = totalSeconds;
   document.getElementById('playBtn').textContent = '▶';
   document.getElementById('timerLabel').textContent = 'Bereit';
@@ -1202,7 +1222,8 @@ function resetTimer() {
 function completeSession() {
   const minutesLearned = Math.round(totalSeconds / 60);
   todayMinutes += minutesLearned;
-  playDone();
+  currentSessionElapsed = 0;
+  playAlarm();
   showConfetti();
 
   // Log
@@ -1220,7 +1241,7 @@ function completeSession() {
   // Reset timer for next session
   timerSeconds = totalSeconds;
   document.getElementById('playBtn').textContent = '▶';
-  document.getElementById('timerLabel').textContent = 'Bereit';
+  document.getElementById('timerLabel').textContent = 'Fertig! 🎉';
   updateTimerDisplay();
 }
 
@@ -1321,7 +1342,8 @@ function updateSessionLog() {
 }
 
 function updateStats() {
-  document.getElementById('statsBadge').textContent = `⭐ ${todayMinutes} Min heute`;
+  const realtimeTotal = todayMinutes + Math.floor(currentSessionElapsed / 60);
+  document.getElementById('statsBadge').textContent = `⭐ ${realtimeTotal} Min heute`;
 }
 
 // === PERSISTENCE (localStorage) ===
@@ -1332,11 +1354,17 @@ function getStorageKey() {
 }
 
 function saveStats() {
+  if (!currentProfile) return;
   try {
-    const profileId = currentProfile === profiles.benno ? 'benno' : 'maxi';
+    const profileId = currentProfile.id;
     const today = new Date().toISOString().slice(0, 10);
-    localStorage.setItem(`lerntimer_${profileId}_${today}`, JSON.stringify({ minutes: todayMinutes, sessions }));
-  } catch(e) {}
+    const data = { minutes: todayMinutes, sessions: sessions.map(s => ({
+      subject: s.subject,
+      minutes: s.minutes,
+      time: s.time instanceof Date ? s.time.toISOString() : s.time
+    }))};
+    localStorage.setItem(`lerntimer_${profileId}_${today}`, JSON.stringify(data));
+  } catch(e) { console.error('saveStats error:', e); }
 }
 
 function loadStats(profileId) {
@@ -1409,6 +1437,8 @@ let statsWeekOffset = 0; // 0 = current week, -1 = last week, etc.
 
 function showStats() {
   playClick();
+  // Save any current session data before viewing stats
+  if (currentProfile) saveStats();
   document.getElementById('profileScreen').style.display = 'none';
   document.getElementById('statsNavBtn').style.display = 'none';
   document.getElementById('statsScreen').classList.add('active');
@@ -1468,11 +1498,13 @@ function formatDateFull(d) {
 
 function loadDayStats(profileId, dateKey) {
   try {
-    const data = JSON.parse(localStorage.getItem(`lerntimer_${profileId}_${dateKey}`));
-    if (data && data.sessions) {
+    const raw = localStorage.getItem(`lerntimer_${profileId}_${dateKey}`);
+    if (!raw) return [];
+    const data = JSON.parse(raw);
+    if (data && Array.isArray(data.sessions)) {
       return data.sessions;
     }
-  } catch(e) {}
+  } catch(e) { console.error('loadDayStats error:', e); }
   return [];
 }
 
@@ -1589,6 +1621,7 @@ function renderStats() {
 // Also add stats button visibility in timer screen nav
 const origGoBack = goBack;
 goBack = function() {
+  if (currentProfile) saveStats();
   origGoBack();
   document.getElementById('statsNavBtn').style.display = 'flex';
 };
